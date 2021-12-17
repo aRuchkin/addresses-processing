@@ -5,12 +5,15 @@ import javax.persistence.Entity;
 import javax.persistence.Id;
 import javax.persistence.Table;
 
-
+/**
+ * Address dictionary entity
+ */
 @Entity
-@Table(name = "sprav_kladr_street")
-public class KladrStreet {
+@Table(name = "sprav_kladr")
+public class KladrDictionary {
 
     @Id
+    @Column(name = "id_kladr")
     private Integer id;
 
     /**
@@ -30,5 +33,9 @@ public class KladrStreet {
 
     public String getKladr() {
         return kladr;
+    }
+
+    public void setFias(String fias) {
+        this.fias = fias;
     }
 }

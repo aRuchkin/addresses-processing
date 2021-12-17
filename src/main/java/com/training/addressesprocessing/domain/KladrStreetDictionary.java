@@ -5,12 +5,14 @@ import javax.persistence.Entity;
 import javax.persistence.Id;
 import javax.persistence.Table;
 
+/**
+ * Street dictionary entity
+ */
 @Entity
-@Table(name = "sprav_kladr")
-public class Kladr {
+@Table(name = "sprav_kladr_street")
+public class KladrStreetDictionary {
 
     @Id
-    @Column(name = "id_kladr")
     private Integer id;
 
     /**
