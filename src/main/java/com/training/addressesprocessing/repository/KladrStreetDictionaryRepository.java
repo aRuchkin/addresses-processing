@@ -6,12 +6,14 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
+
 @Repository
 public interface KladrStreetDictionaryRepository extends JpaRepository<KladrStreetDictionary, Integer> {
 
     KladrStreetDictionary findByKladr(String kladr);
 
     @Query("select ksd from KladrStreetDictionary ksd where kladr like :partKladr%")
-    KladrStreetDictionary findByPartKladr(@Param("partKladr") String partKladr);
+    List<KladrStreetDictionary> findByPartKladr(@Param("partKladr") String partKladr);
 
 }

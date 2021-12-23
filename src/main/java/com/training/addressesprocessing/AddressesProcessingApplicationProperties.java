@@ -10,26 +10,26 @@ public class AddressesProcessingApplicationProperties {
     /**
      * Data Base path
      */
-    private String dbfPath;
+    private String addressFilePath;
 
     /**
      * Data Base archive name (zip)
      */
-    private String dbfName;
+    private String addressFileName;
 
-    public String getDbfPath() {
-        return dbfPath;
+    public String getAddressFilePath() {
+        return addressFilePath;
     }
 
-    public String getDbfName() {
-        return dbfName;
+    public String getAddressFileName() {
+        return addressFileName;
     }
 
-    public void setDbfPath(String dbfPath) {
-        this.dbfPath = dbfPath;
+    public void setAddressFilePath(String addressFilePath) {
+        this.addressFilePath = addressFilePath;
     }
 
-    public void setDbfName(String dbfName) {
-        this.dbfName = dbfName;
+    public void setAddressFileName(String addressFileName) {
+        this.addressFileName = addressFileName;
     }
 }

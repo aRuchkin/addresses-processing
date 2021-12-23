@@ -2,12 +2,11 @@ spring:
   datasource:
     url: jdbc:mysql://localhost:3306/meddoc
     driver-class-name: com.mysql.cj.jdbc.Driver
-    username: root
-    password: root
+    username: user
+    password: user12345
   jpa:
     show-sql: false
 
 app:
-  dbfPath: 'E:\Projects\MyJavaProject\KLADR_to_FIAS_migration\description\dbf\'
-  dbfName: 'ADDROB04.DBF' # todo read from all files ADDROB*.DBF
-  #  dbfName: 'fias_dbf.zip' todo implement to read from zip archive
+  address-file-path: 'E:\Projects\MyJavaProject\KLADR_to_FIAS_migration\description\dbf\'
+  address-file-name: 'fias_dbf_lite.zip'
