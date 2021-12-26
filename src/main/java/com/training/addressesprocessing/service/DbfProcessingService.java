@@ -8,16 +8,14 @@ import com.training.addressesprocessing.domain.KladrStreetDictionary;
 import com.training.addressesprocessing.model.FromDbfFiasAndKladrModel;
 import com.training.addressesprocessing.repository.KladrDictionaryRepository;
 import com.training.addressesprocessing.repository.KladrStreetDictionaryRepository;
-import org.apache.tomcat.util.http.fileupload.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.*;
-import java.util.Enumeration;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.ZipEntry;
-import java.util.zip.ZipFile;
+import java.util.zip.ZipInputStream;
 
 /**
  * Main service for extraction data from DBF and processing dictionaries
@@ -45,63 +43,78 @@ public class DbfProcessingService {
     }
 
     public void processingDbfDataBase() {
-        String fullArchiveName = applicationProperties.getAddressFilePath()
+        String fullPathArchive = applicationProperties.getAddressFilePath()
                 + applicationProperties.getAddressFileName();
-        searchFilesInArchiveAndProcessing(fullArchiveName);
+        File destinationFolder = new File(applicationProperties.getAddressFilePath()
+                + TEMPORARY_FOLDER_FOR_UNZIPPED_FILES);
+        extractNecessaryFilesFromArchive(fullPathArchive, destinationFolder);
+        processingExtractedFiles(destinationFolder);
+        deleteTemporaryFolder(destinationFolder);
+        logger.info("All files are processed!");
     }
 
     /**
-     * Searching files into zip archive and processing
+     * Searching files into zip archive and put in the temporary folder
      */
-    private void searchFilesInArchiveAndProcessing(String pathZip) {
-        ZipFile zipFile = initZipFile(pathZip);
-        Enumeration<? extends ZipEntry> entries = zipFile.entries();
-        while (entries.hasMoreElements()) {
-            ZipEntry currentProcessingFile = entries.nextElement();
-            if (isFileNeedsToProcessing(currentProcessingFile.getName())) {
-                File extractedFile = extractFileFromArchive(zipFile, currentProcessingFile);
-                DBFReader reader =
-                        createReader(extractedFile.getPath());
-                logger.info("Processing file: " + currentProcessingFile.getName());
-                AtomicInteger processedDictionaryRecordCount = new AtomicInteger();
-                int recordCount = reader.getRecordCount();
-                for (int i = 0; i < recordCount; i++) {
-                    FromDbfFiasAndKladrModel fiasAndKladrModel = loadNextEntityData(reader);
-                    // searching in kladr street dictionary
-                    findByKladrInKladrStreetDictionary(processedDictionaryRecordCount, fiasAndKladrModel);
-                    // searching in kladr dictionary
-                    findByKladrAndSetFiasInKladrDictionary(processedDictionaryRecordCount, fiasAndKladrModel);
-                }
-                logger.info("Processed " + recordCount + " DBF records " +
-                        "(" + processedDictionaryRecordCount + " matches)");
-                // todo delete file
-                // doesn't work
-//                try {
-//                    Files.delete(Paths.get(extractedFile.getPath()));
-//                } catch (IOException e) {
-//                    throw new RuntimeException(e);
-//                }
-            }
-        }
-        logger.info("Zip archive processed!");
-        // todo delete temporary folder
-    }
-
-    private File extractFileFromArchive(ZipFile zipFile, ZipEntry currentProcessingFile) {
-        File extractingFile = new File(
-                applicationProperties.getAddressFilePath() + TEMPORARY_FOLDER_FOR_UNZIPPED_FILES,
-                String.valueOf(currentProcessingFile));
+    private void extractNecessaryFilesFromArchive(String fullPathArchive, File destinationFolder) {
         try {
-            extractingFile.getParentFile().mkdir();
-            InputStream inputStream = zipFile.getInputStream(currentProcessingFile);
-            OutputStream outputStream = new FileOutputStream(extractingFile);
-            IOUtils.copy(inputStream, outputStream);
-            inputStream.close();
-            outputStream.close();
+            if (destinationFolder.mkdir()) {
+                logger.info("Created folder: " + destinationFolder.getName());
+            }
+            ZipInputStream zis = new ZipInputStream(new FileInputStream(fullPathArchive));
+            ZipEntry zipEntry = zis.getNextEntry();
+            byte[] buffer = new byte[1024];
+            while (zipEntry != null) {
+                String currentFileName = zipEntry.getName();
+                if (isFileNeedsToProcessing(currentFileName)) {
+                    File newFile = new File(destinationFolder, currentFileName);
+                    FileOutputStream fos = new FileOutputStream(newFile);
+                    int len;
+                    while ((len = zis.read(buffer)) != -1) {
+                        fos.write(buffer, 0, len);
+                    }
+                    fos.close();
+                    logger.info("Extracted: " + currentFileName + " from archive");
+                }
+                zipEntry = zis.getNextEntry();
+            }
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        return extractingFile;
+    }
+
+    /**
+     * Processing extracted files from temporary folder
+     */
+    private void processingExtractedFiles(File destinationFolder) {
+        for (final File fileEntry : destinationFolder.listFiles()) {
+            DBFReader reader =
+                    createReader(fileEntry.getPath());
+            logger.info("Processing file: " + fileEntry.getName());
+            AtomicInteger processedDictionaryRecordCount = new AtomicInteger();
+            int recordCount = reader.getRecordCount();
+            for (int i = 0; i < recordCount; i++) {
+                FromDbfFiasAndKladrModel fiasAndKladrModel = loadNextEntityData(reader);
+                // searching in kladr street dictionary
+                findByKladrInKladrStreetDictionary(processedDictionaryRecordCount, fiasAndKladrModel);
+                // searching in kladr dictionary
+                findByKladrAndSetFiasInKladrDictionary(processedDictionaryRecordCount, fiasAndKladrModel);
+            }
+            logger.info("Processed " + recordCount + " DBF records " +
+                    "(" + processedDictionaryRecordCount + " matches)");
+        }
+    }
+
+    /**
+     * Deleting temporary folder with files
+     */
+    private void deleteTemporaryFolder(File destinationFolder) {
+        for (File fileEntry : destinationFolder.listFiles()) {
+            if (fileEntry.delete())
+                logger.info("Deleted: " + fileEntry.getName());
+        }
+        if (destinationFolder.delete())
+            logger.info("Deleted: " + destinationFolder.getName());
     }
 
     /**
@@ -110,14 +123,6 @@ public class DbfProcessingService {
     private boolean isFileNeedsToProcessing(String fileName) {
         // todo check extension if needed
         return fileName.contains(ALLOWABLE_FILE_NAME_PREFIX);
-    }
-
-    private ZipFile initZipFile(String pathZip) {
-        try {
-            return new ZipFile(pathZip);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
     }
 
     private DBFReader createReader(String fileName) {
