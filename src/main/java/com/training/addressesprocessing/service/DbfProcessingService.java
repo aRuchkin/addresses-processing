@@ -12,7 +12,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.io.*;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -49,7 +54,7 @@ public class DbfProcessingService {
                 + TEMPORARY_FOLDER_FOR_UNZIPPED_FILES);
         extractNecessaryFilesFromArchive(fullPathArchive, destinationFolder);
         processingExtractedFiles(destinationFolder);
-        deleteTemporaryFolder(destinationFolder);
+        deleteTemporaryFolder(destinationFolder, true);
         logger.info("All files are processed!");
     }
 
@@ -57,26 +62,18 @@ public class DbfProcessingService {
      * Searching files into zip archive and put in the temporary folder
      */
     private void extractNecessaryFilesFromArchive(String fullPathArchive, File destinationFolder) {
-        try {
-            if (destinationFolder.mkdir()) {
-                logger.info("Created folder: " + destinationFolder.getName());
-            }
-            ZipInputStream zis = new ZipInputStream(new FileInputStream(fullPathArchive));
-            ZipEntry zipEntry = zis.getNextEntry();
-            byte[] buffer = new byte[1024];
-            while (zipEntry != null) {
+        if (destinationFolder.mkdir()) {
+            logger.info("Created temporary folder: " + destinationFolder.getName());
+        } else {    // if folder has already been
+            deleteTemporaryFolder(destinationFolder, false);
+        }
+        try (ZipInputStream zipInputStream = new ZipInputStream(new FileInputStream(fullPathArchive))) {
+            for (ZipEntry zipEntry; (zipEntry = zipInputStream.getNextEntry()) != null; ) {
                 String currentFileName = zipEntry.getName();
                 if (isFileNeedsToProcessing(currentFileName)) {
-                    File newFile = new File(destinationFolder, currentFileName);
-                    FileOutputStream fos = new FileOutputStream(newFile);
-                    int len;
-                    while ((len = zis.read(buffer)) != -1) {
-                        fos.write(buffer, 0, len);
-                    }
-                    fos.close();
+                    Files.copy(zipInputStream, Paths.get(destinationFolder + "/" + currentFileName));
                     logger.info("Extracted: " + currentFileName + " from archive");
                 }
-                zipEntry = zis.getNextEntry();
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
@@ -106,14 +103,14 @@ public class DbfProcessingService {
     }
 
     /**
-     * Deleting temporary folder with files
+     * Deleting temporary folder (if need) with files
      */
-    private void deleteTemporaryFolder(File destinationFolder) {
+    private void deleteTemporaryFolder(File destinationFolder, boolean needToDeleteFolder) {
         for (File fileEntry : destinationFolder.listFiles()) {
             if (fileEntry.delete())
                 logger.info("Deleted: " + fileEntry.getName());
         }
-        if (destinationFolder.delete())
+        if (needToDeleteFolder && destinationFolder.delete())
             logger.info("Deleted: " + destinationFolder.getName());
     }
 
