@@ -15,7 +15,6 @@ import org.springframework.stereotype.Service;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -48,13 +47,13 @@ public class DbfProcessingService {
     }
 
     public void processingDbfDataBase() {
+        // todo should be created in the constructor of the class
         String fullPathArchive = applicationProperties.getAddressFilePath()
                 + applicationProperties.getAddressFileName();
         File destinationFolder = new File(applicationProperties.getAddressFilePath()
                 + TEMPORARY_FOLDER_FOR_UNZIPPED_FILES);
         extractNecessaryFilesFromArchive(fullPathArchive, destinationFolder);
         processingExtractedFiles(destinationFolder);
-        deleteTemporaryFolder(destinationFolder, true);
         logger.info("All files are processed!");
     }
 
@@ -62,11 +61,7 @@ public class DbfProcessingService {
      * Searching files into zip archive and put in the temporary folder
      */
     private void extractNecessaryFilesFromArchive(String fullPathArchive, File destinationFolder) {
-        if (destinationFolder.mkdir()) {
-            logger.info("Created temporary folder: " + destinationFolder.getName());
-        } else {    // if folder has already been
-            deleteTemporaryFolder(destinationFolder, false);
-        }
+        prepareTemporaryFolder(destinationFolder);
         try (ZipInputStream zipInputStream = new ZipInputStream(new FileInputStream(fullPathArchive))) {
             for (ZipEntry zipEntry; (zipEntry = zipInputStream.getNextEntry()) != null; ) {
                 String currentFileName = zipEntry.getName();
@@ -90,6 +85,7 @@ public class DbfProcessingService {
             logger.info("Processing file: " + fileEntry.getName());
             AtomicInteger processedDictionaryRecordCount = new AtomicInteger();
             int recordCount = reader.getRecordCount();
+            logger.info("Need to process: " + recordCount + " records");
             for (int i = 0; i < recordCount; i++) {
                 FromDbfFiasAndKladrModel fiasAndKladrModel = loadNextEntityData(reader);
                 // searching in kladr street dictionary
@@ -99,19 +95,23 @@ public class DbfProcessingService {
             }
             logger.info("Processed " + recordCount + " DBF records " +
                     "(" + processedDictionaryRecordCount + " matches)");
+            fileEntry.deleteOnExit();
         }
     }
 
     /**
-     * Deleting temporary folder (if need) with files
+     * Deleting files from temporary folder (if need) or create if not exist
      */
-    private void deleteTemporaryFolder(File destinationFolder, boolean needToDeleteFolder) {
-        for (File fileEntry : destinationFolder.listFiles()) {
-            if (fileEntry.delete())
-                logger.info("Deleted: " + fileEntry.getName());
+    private void prepareTemporaryFolder(File destinationFolder) {
+        if (destinationFolder.isDirectory()) {
+            for (File fileEntry : destinationFolder.listFiles()) {
+                if (fileEntry.delete())
+                    logger.info("Deleted: " + fileEntry.getName());
+            }
+        } else {
+            logger.info("Created temporary folder: " + destinationFolder.getName());
+            destinationFolder.mkdir();
         }
-        if (needToDeleteFolder && destinationFolder.delete())
-            logger.info("Deleted: " + destinationFolder.getName());
     }
 
     /**
@@ -119,24 +119,18 @@ public class DbfProcessingService {
      */
     private boolean isFileNeedsToProcessing(String fileName) {
         // todo check extension if needed
+        // todo need to use regular expression
         return fileName.contains(ALLOWABLE_FILE_NAME_PREFIX);
     }
 
     private DBFReader createReader(String fileName) {
-        InputStream stream;
         try {
-            stream = new FileInputStream(fileName);
+            DBFReader reader = new DBFReader(new FileInputStream(fileName));
+            reader.setCharactersetName(IMPORTED_FILE_ENCODING);
+            return reader;
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        DBFReader reader;
-        try {
-            reader = new DBFReader(stream);
-        } catch (DBFException e) {
-            throw new RuntimeException(e);
-        }
-        reader.setCharactersetName(IMPORTED_FILE_ENCODING);
-        return reader;
     }
 
     /**
@@ -146,12 +140,12 @@ public class DbfProcessingService {
         Object[] objects;
         try {
             objects = reader.nextRecord();
+            return new FromDbfFiasAndKladrModel(
+                    objects[FIAS_FIELD_INDEX].toString(),
+                    objects[KLADR_FIELD_INDEX].toString());
         } catch (DBFException e) {
             throw new RuntimeException(e);
         }
-        return new FromDbfFiasAndKladrModel(
-                objects[FIAS_FIELD_INDEX].toString(),
-                objects[KLADR_FIELD_INDEX].toString());
     }
 
     /**
@@ -164,7 +158,6 @@ public class DbfProcessingService {
                 kladrStreetDictionaryRepository.findByKladr(fiasAndKladr.getKladr());
         if (kladrStreetDictionary != null) {
             setFiasInKladrStreetDictionary(processedDictionaryRecordCount, kladrStreetDictionary, fiasAndKladr.getFias());
-//            setFiasInDictionary(processedDictionaryRecordCount, kladrStreetDictionary, fiasAndKladr.getFias());
         } else {
             // attempt to find by part KLADR (-2 last digits)
             kladrStreetDictionaryRepository.findByPartKladr(
