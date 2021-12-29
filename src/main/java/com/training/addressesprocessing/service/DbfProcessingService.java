@@ -16,8 +16,11 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -79,23 +82,31 @@ public class DbfProcessingService {
      * Processing extracted files from temporary folder
      */
     private void processingExtractedFiles(File destinationFolder) {
-        for (final File fileEntry : destinationFolder.listFiles()) {
-            DBFReader reader =
-                    createReader(fileEntry.getPath());
-            logger.info("Processing file: " + fileEntry.getName());
-            AtomicInteger processedDictionaryRecordCount = new AtomicInteger();
-            int recordCount = reader.getRecordCount();
-            logger.info("Need to process: " + recordCount + " records");
-            for (int i = 0; i < recordCount; i++) {
-                FromDbfFiasAndKladrModel fiasAndKladrModel = loadNextEntityData(reader);
-                // searching in kladr street dictionary
-                findByKladrInKladrStreetDictionary(processedDictionaryRecordCount, fiasAndKladrModel);
-                // searching in kladr dictionary
-                findByKladrAndSetFiasInKladrDictionary(processedDictionaryRecordCount, fiasAndKladrModel);
+        try {
+            List<File> filesInFolder = Files.walk(Paths.get(destinationFolder.getAbsolutePath()))
+                    .filter(Files::isRegularFile)
+                    .map(Path::toFile)
+                    .collect(Collectors.toList());
+            for (File file : filesInFolder) {
+                DBFReader reader = new DBFReader(new FileInputStream(file));
+                reader.setCharactersetName(IMPORTED_FILE_ENCODING);
+                logger.info("Processing file: " + file.getName());
+                AtomicInteger processedDictionaryRecordCount = new AtomicInteger();
+                int recordCount = reader.getRecordCount();
+                logger.info("Need to process: " + recordCount + " records");
+                for (int i = 0; i < recordCount; i++) {
+                    FromDbfFiasAndKladrModel fiasAndKladrModel = loadNextEntityData(reader);
+                    // searching in kladr street dictionary
+                    findByKladrInKladrStreetDictionary(processedDictionaryRecordCount, fiasAndKladrModel);
+                    // searching in kladr dictionary
+                    findByKladrAndSetFiasInKladrDictionary(processedDictionaryRecordCount, fiasAndKladrModel);
+                }
+                logger.info("Processed " + recordCount + " DBF records " +
+                        "(" + processedDictionaryRecordCount + " matches)");
+                file.deleteOnExit();
             }
-            logger.info("Processed " + recordCount + " DBF records " +
-                    "(" + processedDictionaryRecordCount + " matches)");
-            fileEntry.deleteOnExit();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
     }
 
