@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -32,29 +33,28 @@ public class DbfProcessingService {
 
     private final Logger logger = LoggerFactory.getLogger(getClass());
     private static final String IMPORTED_FILE_ENCODING = "CP866";
-    private static final String ALLOWABLE_FILE_NAME_PREFIX = "ADDROB";
+    private static final Pattern ALLOWABLE_FILE_NAME_PATTERN = Pattern.compile("\\bADDROB\\d+\\.DBF\\b");
     private static final String TEMPORARY_FOLDER_FOR_UNZIPPED_FILES = "TEMP";
     private static final int FIAS_FIELD_INDEX = 1;  // index of FIAS identifier in database record
     private static final int KLADR_FIELD_INDEX = 8; // index of KLADR identifier in database record
 
-    private final AddressesProcessingApplicationProperties applicationProperties;
     private final KladrDictionaryRepository kladrDictionaryRepository;
     private final KladrStreetDictionaryRepository kladrStreetDictionaryRepository;
+    private final String fullPathArchive;
+    private final File destinationFolder;
 
     public DbfProcessingService(AddressesProcessingApplicationProperties applicationProperties,
                                 KladrDictionaryRepository kladrDictionaryRepository,
                                 KladrStreetDictionaryRepository kladrStreetDictionaryRepository) {
-        this.applicationProperties = applicationProperties;
         this.kladrDictionaryRepository = kladrDictionaryRepository;
         this.kladrStreetDictionaryRepository = kladrStreetDictionaryRepository;
+        this.fullPathArchive = applicationProperties.getAddressFilePath()
+                + applicationProperties.getAddressFileName();
+        this.destinationFolder = new File(applicationProperties.getAddressFilePath()
+                + TEMPORARY_FOLDER_FOR_UNZIPPED_FILES);
     }
 
     public void processingDbfDataBase() {
-        // todo should be created in the constructor of the class
-        String fullPathArchive = applicationProperties.getAddressFilePath()
-                + applicationProperties.getAddressFileName();
-        File destinationFolder = new File(applicationProperties.getAddressFilePath()
-                + TEMPORARY_FOLDER_FOR_UNZIPPED_FILES);
         extractNecessaryFilesFromArchive(fullPathArchive, destinationFolder);
         processingExtractedFiles(destinationFolder);
         logger.info("All files are processed!");
@@ -129,19 +129,7 @@ public class DbfProcessingService {
      * Validation file name (ADDROB*.DBF)
      */
     private boolean isFileNeedsToProcessing(String fileName) {
-        // todo check extension if needed
-        // todo need to use regular expression
-        return fileName.contains(ALLOWABLE_FILE_NAME_PREFIX);
-    }
-
-    private DBFReader createReader(String fileName) {
-        try {
-            DBFReader reader = new DBFReader(new FileInputStream(fileName));
-            reader.setCharactersetName(IMPORTED_FILE_ENCODING);
-            return reader;
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        return ALLOWABLE_FILE_NAME_PATTERN.matcher(fileName).find();
     }
 
     /**
