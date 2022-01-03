@@ -33,7 +33,7 @@ public class DbfProcessingService {
 
     private final Logger logger = LoggerFactory.getLogger(getClass());
     private static final String IMPORTED_FILE_ENCODING = "CP866";
-    private static final Pattern ALLOWABLE_FILE_NAME_PATTERN = Pattern.compile("\\bADDROB\\d+\\.DBF\\b");
+    private static final Pattern ALLOWABLE_FILE_NAME_PATTERN = Pattern.compile("\\bADDROB\\d{2}\\.DBF\\b");
     private static final String TEMPORARY_FOLDER_FOR_UNZIPPED_FILES = "TEMP";
     private static final int FIAS_FIELD_INDEX = 1;  // index of FIAS identifier in database record
     private static final int KLADR_FIELD_INDEX = 8; // index of KLADR identifier in database record
@@ -94,10 +94,10 @@ public class DbfProcessingService {
                 AtomicInteger processedDictionaryRecordCount = new AtomicInteger();
                 int recordCount = reader.getRecordCount();
                 logger.info("Need to process: " + recordCount + " records");
-                for (int i = 0; i < recordCount; i++) {
-                    FromDbfFiasAndKladrModel fiasAndKladrModel = loadNextEntityData(reader);
-                    findByKladrAndSetFiasInDictionaries(processedDictionaryRecordCount, fiasAndKladrModel);
-                }
+//                for (int i = 0; i < recordCount; i++) {
+//                    FromDbfFiasAndKladrModel fiasAndKladrModel = loadNextEntityData(reader);
+//                    findByKladrAndSetFiasInDictionaries(processedDictionaryRecordCount, fiasAndKladrModel);
+//                }
                 logger.info("Processed " + recordCount + " DBF records " +
                         "(" + processedDictionaryRecordCount + " matches)");
                 file.deleteOnExit();
