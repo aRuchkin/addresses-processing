@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -88,19 +89,21 @@ public class DbfProcessingService {
                     .map(Path::toFile)
                     .collect(Collectors.toList());
             for (File file : filesInFolder) {
-                DBFReader reader = new DBFReader(new FileInputStream(file));
-                reader.setCharactersetName(IMPORTED_FILE_ENCODING);
-                logger.info("Processing file: " + file.getName());
-                AtomicInteger processedDictionaryRecordCount = new AtomicInteger();
-                int recordCount = reader.getRecordCount();
-                logger.info("Need to process: " + recordCount + " records");
-//                for (int i = 0; i < recordCount; i++) {
-//                    FromDbfFiasAndKladrModel fiasAndKladrModel = loadNextEntityData(reader);
-//                    findByKladrAndSetFiasInDictionaries(processedDictionaryRecordCount, fiasAndKladrModel);
-//                }
-                logger.info("Processed " + recordCount + " DBF records " +
-                        "(" + processedDictionaryRecordCount + " matches)");
-                file.deleteOnExit();
+                try (InputStream inputStream = new FileInputStream(file)) {
+                    DBFReader reader = new DBFReader(inputStream);
+                    reader.setCharactersetName(IMPORTED_FILE_ENCODING);
+                    logger.info("Processing file: " + file.getName());
+                    AtomicInteger processedDictionaryRecordCount = new AtomicInteger();
+                    int recordCount = reader.getRecordCount();
+                    logger.info("Need to process: " + recordCount + " records");
+                    for (int i = 0; i < recordCount; i++) {
+                        FromDbfFiasAndKladrModel fiasAndKladrModel = loadNextEntityData(reader);
+                        findByKladrAndSetFiasInDictionaries(processedDictionaryRecordCount, fiasAndKladrModel);
+                    }
+                    logger.info("Processed " + recordCount + " DBF records " +
+                            "(" + processedDictionaryRecordCount + " matches)");
+                    file.deleteOnExit();
+                }
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
