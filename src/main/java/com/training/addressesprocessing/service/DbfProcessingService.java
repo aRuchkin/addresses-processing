@@ -19,6 +19,8 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
@@ -96,7 +98,13 @@ public class DbfProcessingService {
                     AtomicInteger processedDictionaryRecordCount = new AtomicInteger();
                     int recordCount = reader.getRecordCount();
                     logger.info("Need to process: " + recordCount + " records");
+                    LocalDateTime packetProcessingTime = LocalDateTime.now();
                     for (int i = 0; i < recordCount; i++) {
+                        if (i % 5000 == 0) {
+                            logger.info("Processed " + i + " records");
+                            logger.info((Duration.between(packetProcessingTime, LocalDateTime.now())).getSeconds() + " seconds");
+                            packetProcessingTime = LocalDateTime.now();
+                        }
                         FromDbfFiasAndKladrModel fiasAndKladrModel = loadNextEntityData(reader);
                         findByKladrAndSetFiasInDictionaries(processedDictionaryRecordCount, fiasAndKladrModel);
                     }
