@@ -160,27 +160,30 @@ public class DbfProcessingService {
      */
     private void findByKladrAndSetFiasInDictionaries(AtomicInteger processedDictionaryRecordCount,
                                                      FromDbfFiasAndKladrModel fiasAndKladr) {
-        // find in KLADR Dictionary
-        KladrDictionary kladrDictionary =
-                kladrDictionaryRepository.findByKladr(fiasAndKladr.getKladr());
-        if (kladrDictionary != null) {
-            setFiasInDictionary(processedDictionaryRecordCount, kladrDictionary, fiasAndKladr.getFias());
+        if (fiasAndKladr.getKladr().trim().length() == 17) {
+            // find in KLADR Street Dictionary
+            KladrStreetDictionary kladrStreetDictionary =
+                    kladrStreetDictionaryRepository.findByKladr(fiasAndKladr.getKladr());
+            if (kladrStreetDictionary != null) {
+                setFiasInDictionary(processedDictionaryRecordCount, kladrStreetDictionary, fiasAndKladr.getFias());
+            } else {
+                // attempt to find by part KLADR (-2 last digits)
+                kladrStreetDictionaryRepository.findByPartKladr(
+                        getPartOfKladr(fiasAndKladr.getKladr()))
+                        .forEach(e -> setFiasInDictionary(processedDictionaryRecordCount, e, fiasAndKladr.getFias()));
+            }
         } else {
-            // attempt to find by part KLADR (-2 last digits)
-            kladrDictionaryRepository.findByPartKladr(
-                    getPartOfKladr(fiasAndKladr.getKladr()))
-                    .forEach(e -> setFiasInDictionary(processedDictionaryRecordCount, e, fiasAndKladr.getFias()));
-        }
-        // find in KLADR Street Dictionary
-        KladrStreetDictionary kladrStreetDictionary =
-                kladrStreetDictionaryRepository.findByKladr(fiasAndKladr.getKladr());
-        if (kladrStreetDictionary != null) {
-            setFiasInDictionary(processedDictionaryRecordCount, kladrStreetDictionary, fiasAndKladr.getFias());
-        } else {
-            // attempt to find by part KLADR (-2 last digits)
-            kladrStreetDictionaryRepository.findByPartKladr(
-                    getPartOfKladr(fiasAndKladr.getKladr()))
-                    .forEach(e -> setFiasInDictionary(processedDictionaryRecordCount, e, fiasAndKladr.getFias()));
+            // find in KLADR Dictionary
+            KladrDictionary kladrDictionary =
+                    kladrDictionaryRepository.findByKladr(fiasAndKladr.getKladr());
+            if (kladrDictionary != null) {
+                setFiasInDictionary(processedDictionaryRecordCount, kladrDictionary, fiasAndKladr.getFias());
+            } else {
+                // attempt to find by part KLADR (-2 last digits)
+                kladrDictionaryRepository.findByPartKladr(
+                        getPartOfKladr(fiasAndKladr.getKladr()))
+                        .forEach(e -> setFiasInDictionary(processedDictionaryRecordCount, e, fiasAndKladr.getFias()));
+            }
         }
     }
 
