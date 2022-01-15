@@ -13,7 +13,7 @@ public interface KladrStreetDictionaryRepository extends JpaRepository<KladrStre
 
     KladrStreetDictionary findByKladr(String kladr);
 
-    @Query("select ksd from KladrStreetDictionary ksd where kladr like :partKladr%")
+    @Query("select ksd from KladrStreetDictionary ksd where ksd.kladr like :partKladr%")
     List<KladrStreetDictionary> findByPartKladr(@Param("partKladr") String partKladr);
 
 }

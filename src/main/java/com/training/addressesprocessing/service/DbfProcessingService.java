@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
@@ -40,21 +41,25 @@ public class DbfProcessingService {
     private static final String TEMPORARY_FOLDER_FOR_UNZIPPED_FILES = "TEMP";
     private static final int FIAS_FIELD_INDEX = 1;  // index of FIAS identifier in database record
     private static final int KLADR_FIELD_INDEX = 8; // index of KLADR identifier in database record
+    private static final int PACKET_PROCESSING_SIZE = 5000;
 
     private final KladrDictionaryRepository kladrDictionaryRepository;
     private final KladrStreetDictionaryRepository kladrStreetDictionaryRepository;
     private final String fullPathArchive;
     private final File destinationFolder;
+    private final EntitiesSavingService entitiesSavingService;
 
     public DbfProcessingService(AddressesProcessingApplicationProperties applicationProperties,
                                 KladrDictionaryRepository kladrDictionaryRepository,
-                                KladrStreetDictionaryRepository kladrStreetDictionaryRepository) {
+                                KladrStreetDictionaryRepository kladrStreetDictionaryRepository,
+                                EntitiesSavingService entitiesSavingService) {
         this.kladrDictionaryRepository = kladrDictionaryRepository;
         this.kladrStreetDictionaryRepository = kladrStreetDictionaryRepository;
         this.fullPathArchive = applicationProperties.getAddressFilePath()
                 + applicationProperties.getAddressFileName();
         this.destinationFolder = new File(applicationProperties.getAddressFilePath()
                 + TEMPORARY_FOLDER_FOR_UNZIPPED_FILES);
+        this.entitiesSavingService = entitiesSavingService;
     }
 
     public void processingDbfDataBase() {
@@ -96,18 +101,28 @@ public class DbfProcessingService {
                     reader.setCharactersetName(IMPORTED_FILE_ENCODING);
                     logger.info("Processing file: " + file.getName());
                     AtomicInteger processedDictionaryRecordCount = new AtomicInteger();
+                    List<KladrStreetDictionary> kladrStreetDictionaries = new ArrayList<>();
+                    List<KladrDictionary> kladrDictionaries = new ArrayList<>();
                     int recordCount = reader.getRecordCount();
                     logger.info("Need to process: " + recordCount + " records");
                     LocalDateTime packetProcessingTime = LocalDateTime.now();
                     for (int i = 0; i < recordCount; i++) {
-                        if (i % 5000 == 0) {
+                        if (i % PACKET_PROCESSING_SIZE == 0) {
                             logger.info("Processed " + i + " records");
                             logger.info((Duration.between(packetProcessingTime, LocalDateTime.now())).getSeconds() + " seconds");
                             packetProcessingTime = LocalDateTime.now();
+                            // save both collections of entities to BD and clear
+                            entitiesSavingService.savePacketsOfEntities(kladrDictionaries, kladrStreetDictionaries);
                         }
                         FromDbfFiasAndKladrModel fiasAndKladrModel = loadNextEntityData(reader);
-                        findByKladrAndSetFiasInDictionaries(processedDictionaryRecordCount, fiasAndKladrModel);
+                        findByKladrInDictionaries(
+                                processedDictionaryRecordCount,
+                                fiasAndKladrModel,
+                                kladrStreetDictionaries,
+                                kladrDictionaries);
                     }
+                    // save rest collections of entities to BD and clear
+                    entitiesSavingService.savePacketsOfEntities(kladrDictionaries, kladrStreetDictionaries);
                     logger.info("Processed " + recordCount + " DBF records " +
                             "(" + processedDictionaryRecordCount + " matches)");
                     file.deleteOnExit();
@@ -148,8 +163,8 @@ public class DbfProcessingService {
         try {
             objects = reader.nextRecord();
             return new FromDbfFiasAndKladrModel(
-                    objects[FIAS_FIELD_INDEX].toString(),
-                    objects[KLADR_FIELD_INDEX].toString());
+                    objects[FIAS_FIELD_INDEX].toString().trim(),
+                    objects[KLADR_FIELD_INDEX].toString().trim());
         } catch (DBFException e) {
             throw new RuntimeException(e);
         }
@@ -158,33 +173,74 @@ public class DbfProcessingService {
     /**
      * Searching row in Dictionaries by KLADR and part KLADR
      */
-    private void findByKladrAndSetFiasInDictionaries(AtomicInteger processedDictionaryRecordCount,
-                                                     FromDbfFiasAndKladrModel fiasAndKladr) {
-        if (fiasAndKladr.getKladr().trim().length() == 17) {
-            // find in KLADR Street Dictionary
+    private void findByKladrInDictionaries(AtomicInteger processedDictionaryRecordCount,
+                                           FromDbfFiasAndKladrModel fiasAndKladr,
+                                           List<KladrStreetDictionary> kladrStreetDictionaries,
+                                           List<KladrDictionary> kladrDictionaries) {
+        int fiasFromDbfLength = fiasAndKladr.getKladr().length();
+        if (fiasFromDbfLength == 17) {
             KladrStreetDictionary kladrStreetDictionary =
                     kladrStreetDictionaryRepository.findByKladr(fiasAndKladr.getKladr());
             if (kladrStreetDictionary != null) {
-                setFiasInDictionary(processedDictionaryRecordCount, kladrStreetDictionary, fiasAndKladr.getFias());
+                addEntityKladrStreetToCollection(
+                        processedDictionaryRecordCount,
+                        kladrStreetDictionary,
+                        fiasAndKladr.getFias(),
+                        kladrStreetDictionaries);
             } else {
                 // attempt to find by part KLADR (-2 last digits)
                 kladrStreetDictionaryRepository.findByPartKladr(
                         getPartOfKladr(fiasAndKladr.getKladr()))
-                        .forEach(e -> setFiasInDictionary(processedDictionaryRecordCount, e, fiasAndKladr.getFias()));
+                        .forEach(e -> addEntityKladrStreetToCollection(
+                                processedDictionaryRecordCount,
+                                e,
+                                fiasAndKladr.getFias(),
+                                kladrStreetDictionaries));
             }
-        } else {
-            // find in KLADR Dictionary
+        } else if (fiasFromDbfLength != 0) {
             KladrDictionary kladrDictionary =
                     kladrDictionaryRepository.findByKladr(fiasAndKladr.getKladr());
             if (kladrDictionary != null) {
-                setFiasInDictionary(processedDictionaryRecordCount, kladrDictionary, fiasAndKladr.getFias());
+                addEntityKladrToCollection(
+                        processedDictionaryRecordCount,
+                        kladrDictionary,
+                        fiasAndKladr.getFias(),
+                        kladrDictionaries);
             } else {
                 // attempt to find by part KLADR (-2 last digits)
                 kladrDictionaryRepository.findByPartKladr(
                         getPartOfKladr(fiasAndKladr.getKladr()))
-                        .forEach(e -> setFiasInDictionary(processedDictionaryRecordCount, e, fiasAndKladr.getFias()));
+                        .forEach(e -> addEntityKladrToCollection(
+                                processedDictionaryRecordCount,
+                                e,
+                                fiasAndKladr.getFias(),
+                                kladrDictionaries));
             }
         }
+    }
+
+    /**
+     * Setting FIAS to entity and addition to collection (for streets only)
+     */
+    private void addEntityKladrStreetToCollection(AtomicInteger processedDictionaryRecordCount,
+                                                  KladrStreetDictionary kladrStreetDictionary,
+                                                  String fias,
+                                                  List<KladrStreetDictionary> kladrStreetDictionaries) {
+        kladrStreetDictionary.setFias(fias);
+        kladrStreetDictionaries.add(kladrStreetDictionary);
+        processedDictionaryRecordCount.incrementAndGet();
+    }
+
+    /**
+     * Setting FIAS to entity and addition to collection (for not streets)
+     */
+    private void addEntityKladrToCollection(AtomicInteger processedDictionaryRecordCount,
+                                            KladrDictionary kladrDictionary,
+                                            String fias,
+                                            List<KladrDictionary> kladrDictionaries) {
+        kladrDictionary.setFias(fias);
+        kladrDictionaries.add(kladrDictionary);
+        processedDictionaryRecordCount.incrementAndGet();
     }
 
     /**
@@ -192,27 +248,5 @@ public class DbfProcessingService {
      */
     private String getPartOfKladr(String fullKladr) {
         return fullKladr.substring(0, fullKladr.length() - 2);
-    }
-
-    /**
-     * Set FIAS in KLADR Street Dictionary row and increment count
-     */
-    private void setFiasInDictionary(AtomicInteger processedDictionaryRecordCount,
-                                     KladrStreetDictionary kladrStreetDictionary,
-                                     String fiasId) {
-        kladrStreetDictionary.setFias(fiasId);
-        kladrStreetDictionaryRepository.save(kladrStreetDictionary);
-        processedDictionaryRecordCount.incrementAndGet();
-    }
-
-    /**
-     * Set FIAS in KLADR Dictionary row and increment count
-     */
-    private void setFiasInDictionary(AtomicInteger processedDictionaryRecordCount,
-                                     KladrDictionary kladrDictionary,
-                                     String fiasId) {
-        kladrDictionary.setFias(fiasId);
-        kladrDictionaryRepository.save(kladrDictionary);
-        processedDictionaryRecordCount.incrementAndGet();
     }
 }

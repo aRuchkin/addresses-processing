@@ -9,4 +9,4 @@ spring:
 
 app:
   address-file-path: 'E:\Projects\MyJavaProject\KLADR_to_FIAS_migration\description\dbf\'
-  address-file-name: 'fias_dbf_lite.zip'
+  address-file-name: 'fias_dbf.zip'
