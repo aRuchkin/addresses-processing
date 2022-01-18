@@ -3,11 +3,11 @@ package com.training.addressesprocessing.service;
 import com.linuxense.javadbf.DBFException;
 import com.linuxense.javadbf.DBFReader;
 import com.training.addressesprocessing.AddressesProcessingApplicationProperties;
-import com.training.addressesprocessing.domain.KladrDictionary;
-import com.training.addressesprocessing.domain.KladrStreetDictionary;
-import com.training.addressesprocessing.model.FromDbfFiasAndKladrModel;
-import com.training.addressesprocessing.repository.KladrDictionaryRepository;
-import com.training.addressesprocessing.repository.KladrStreetDictionaryRepository;
+import com.training.addressesprocessing.domain.Settlement;
+import com.training.addressesprocessing.domain.Street;
+import com.training.addressesprocessing.model.ExternalAddressModel;
+import com.training.addressesprocessing.repository.SettlementRepository;
+import com.training.addressesprocessing.repository.StreetRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -19,8 +19,6 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -37,46 +35,46 @@ public class DbfProcessingService {
 
     private final Logger logger = LoggerFactory.getLogger(getClass());
     private static final String IMPORTED_FILE_ENCODING = "CP866";
-    private static final Pattern ALLOWABLE_FILE_NAME_PATTERN = Pattern.compile("\\bADDROB\\d{2}\\.DBF\\b");
-    private static final String TEMPORARY_FOLDER_FOR_UNZIPPED_FILES = "TEMP";
-    private static final int FIAS_FIELD_INDEX = 1;  // index of FIAS identifier in database record
-    private static final int KLADR_FIELD_INDEX = 8; // index of KLADR identifier in database record
-    private static final int PACKET_PROCESSING_SIZE = 5000;
+    private static final Pattern ALLOWABLE_FILE_NAME_PATTERN = Pattern.compile("^ADDROB\\d{2}\\.DBF$");
+    private static final String EXTRACTED_FILES_FOLDER_NAME = "TEMP";
+    private static final int FEDERAL_ADDRESS_CODE_FIELD_INDEX = 1;  // index of federal address code in database record
+    private static final int ADDRESS_CODE_FIELD_INDEX = 8; // index of address code in database record
+    private static final int PACKAGE_PROCESSING_SIZE = 5000;
 
-    private final KladrDictionaryRepository kladrDictionaryRepository;
-    private final KladrStreetDictionaryRepository kladrStreetDictionaryRepository;
+    private final SettlementRepository settlementRepository;
+    private final StreetRepository streetRepository;
     private final String fullPathArchive;
     private final File destinationFolder;
-    private final EntitiesSavingService entitiesSavingService;
+    private final BatchAddressService batchAddressService;
 
     public DbfProcessingService(AddressesProcessingApplicationProperties applicationProperties,
-                                KladrDictionaryRepository kladrDictionaryRepository,
-                                KladrStreetDictionaryRepository kladrStreetDictionaryRepository,
-                                EntitiesSavingService entitiesSavingService) {
-        this.kladrDictionaryRepository = kladrDictionaryRepository;
-        this.kladrStreetDictionaryRepository = kladrStreetDictionaryRepository;
+                                SettlementRepository settlementRepository,
+                                StreetRepository streetRepository,
+                                BatchAddressService batchAddressService) {
+        this.settlementRepository = settlementRepository;
+        this.streetRepository = streetRepository;
         this.fullPathArchive = applicationProperties.getAddressFilePath()
                 + applicationProperties.getAddressFileName();
         this.destinationFolder = new File(applicationProperties.getAddressFilePath()
-                + TEMPORARY_FOLDER_FOR_UNZIPPED_FILES);
-        this.entitiesSavingService = entitiesSavingService;
+                + EXTRACTED_FILES_FOLDER_NAME);
+        this.batchAddressService = batchAddressService;
     }
 
-    public void processingDbfDataBase() {
-        extractNecessaryFilesFromArchive(fullPathArchive, destinationFolder);
-        processingExtractedFiles(destinationFolder);
+    public void process() {
+        extractFiles(fullPathArchive, destinationFolder);
+        process(destinationFolder);
         logger.info("All files are processed!");
     }
 
     /**
      * Searching files into zip archive and put in the temporary folder
      */
-    private void extractNecessaryFilesFromArchive(String fullPathArchive, File destinationFolder) {
-        prepareTemporaryFolder(destinationFolder);
+    private void extractFiles(String fullPathArchive, File destinationFolder) {
+        prepareExtractedFilesFolder(destinationFolder);
         try (ZipInputStream zipInputStream = new ZipInputStream(new FileInputStream(fullPathArchive))) {
             for (ZipEntry zipEntry; (zipEntry = zipInputStream.getNextEntry()) != null; ) {
                 String currentFileName = zipEntry.getName();
-                if (isFileNeedsToProcessing(currentFileName)) {
+                if (ALLOWABLE_FILE_NAME_PATTERN.matcher(currentFileName).find()) {
                     Files.copy(zipInputStream, Paths.get(destinationFolder + "/" + currentFileName));
                     logger.info("Extracted: " + currentFileName + " from archive");
                 }
@@ -89,40 +87,36 @@ public class DbfProcessingService {
     /**
      * Processing extracted files from temporary folder
      */
-    private void processingExtractedFiles(File destinationFolder) {
+    private void process(File destinationFolder) {
         try {
             List<File> filesInFolder = Files.walk(Paths.get(destinationFolder.getAbsolutePath()))
                     .filter(Files::isRegularFile)
                     .map(Path::toFile)
                     .collect(Collectors.toList());
             for (File file : filesInFolder) {
+                AtomicInteger processedDictionaryRecordCount = new AtomicInteger();
+                List<Street> streets = new ArrayList<>();
+                List<Settlement> settlements = new ArrayList<>();
                 try (InputStream inputStream = new FileInputStream(file)) {
                     DBFReader reader = new DBFReader(inputStream);
                     reader.setCharactersetName(IMPORTED_FILE_ENCODING);
                     logger.info("Processing file: " + file.getName());
-                    AtomicInteger processedDictionaryRecordCount = new AtomicInteger();
-                    List<KladrStreetDictionary> kladrStreetDictionaries = new ArrayList<>();
-                    List<KladrDictionary> kladrDictionaries = new ArrayList<>();
                     int recordCount = reader.getRecordCount();
                     logger.info("Need to process: " + recordCount + " records");
-                    LocalDateTime packetProcessingTime = LocalDateTime.now();
                     for (int i = 0; i < recordCount; i++) {
-                        if (i % PACKET_PROCESSING_SIZE == 0) {
-                            logger.info("Processed " + i + " records");
-                            logger.info((Duration.between(packetProcessingTime, LocalDateTime.now())).getSeconds() + " seconds");
-                            packetProcessingTime = LocalDateTime.now();
-                            // save both collections of entities to BD and clear
-                            entitiesSavingService.savePacketsOfEntities(kladrDictionaries, kladrStreetDictionaries);
+                        if (i % PACKAGE_PROCESSING_SIZE == 0) {
+                            // save both collections of entities to DB and clear
+                            batchAddressService.store(settlements, streets);
                         }
-                        FromDbfFiasAndKladrModel fiasAndKladrModel = loadNextEntityData(reader);
-                        findByKladrInDictionaries(
+                        ExternalAddressModel externalAddressModel = loadNextAddressData(reader);
+                        findByAddressCodeInDictionaries(
                                 processedDictionaryRecordCount,
-                                fiasAndKladrModel,
-                                kladrStreetDictionaries,
-                                kladrDictionaries);
+                                externalAddressModel,
+                                streets,
+                                settlements);
                     }
                     // save rest collections of entities to BD and clear
-                    entitiesSavingService.savePacketsOfEntities(kladrDictionaries, kladrStreetDictionaries);
+                    batchAddressService.store(settlements, streets);
                     logger.info("Processed " + recordCount + " DBF records " +
                             "(" + processedDictionaryRecordCount + " matches)");
                     file.deleteOnExit();
@@ -136,7 +130,7 @@ public class DbfProcessingService {
     /**
      * Deleting files from temporary folder (if need) or create if not exist
      */
-    private void prepareTemporaryFolder(File destinationFolder) {
+    private void prepareExtractedFilesFolder(File destinationFolder) {
         if (destinationFolder.isDirectory()) {
             for (File fileEntry : destinationFolder.listFiles()) {
                 if (fileEntry.delete())
@@ -149,104 +143,96 @@ public class DbfProcessingService {
     }
 
     /**
-     * Validation file name (ADDROB*.DBF)
-     */
-    private boolean isFileNeedsToProcessing(String fileName) {
-        return ALLOWABLE_FILE_NAME_PATTERN.matcher(fileName).find();
-    }
-
-    /**
      * Get next row from DBF (one by one)
      */
-    private FromDbfFiasAndKladrModel loadNextEntityData(DBFReader reader) {
-        Object[] objects;
+    private ExternalAddressModel loadNextAddressData(DBFReader reader) {
         try {
-            objects = reader.nextRecord();
-            return new FromDbfFiasAndKladrModel(
-                    objects[FIAS_FIELD_INDEX].toString().trim(),
-                    objects[KLADR_FIELD_INDEX].toString().trim());
+            Object[] objects = reader.nextRecord();
+            return new ExternalAddressModel(
+                    objects[FEDERAL_ADDRESS_CODE_FIELD_INDEX].toString().trim(),
+                    objects[ADDRESS_CODE_FIELD_INDEX].toString().trim());
         } catch (DBFException e) {
             throw new RuntimeException(e);
         }
     }
 
     /**
-     * Searching row in Dictionaries by KLADR and part KLADR
+     * Searching row in dictionaries by address
      */
-    private void findByKladrInDictionaries(AtomicInteger processedDictionaryRecordCount,
-                                           FromDbfFiasAndKladrModel fiasAndKladr,
-                                           List<KladrStreetDictionary> kladrStreetDictionaries,
-                                           List<KladrDictionary> kladrDictionaries) {
-        int fiasFromDbfLength = fiasAndKladr.getKladr().length();
-        if (fiasFromDbfLength == 17) {
-            KladrStreetDictionary kladrStreetDictionary =
-                    kladrStreetDictionaryRepository.findByKladr(fiasAndKladr.getKladr());
-            if (kladrStreetDictionary != null) {
-                addEntityKladrStreetToCollection(
+    private void findByAddressCodeInDictionaries(AtomicInteger processedDictionaryRecordCount,
+                                                 ExternalAddressModel externalAddressModel,
+                                                 List<Street> streets,
+                                                 List<Settlement> settlements) {
+        int federalAddressCodeFromDbfLength = externalAddressModel.getAddressCode().length();
+        if (federalAddressCodeFromDbfLength == 17) {
+            Street street =
+                    streetRepository.getByAddressCode(externalAddressModel.getAddressCode());
+            if (street != null) {
+                addEntityStreetToCollection(
                         processedDictionaryRecordCount,
-                        kladrStreetDictionary,
-                        fiasAndKladr.getFias(),
-                        kladrStreetDictionaries);
+                        street,
+                        externalAddressModel.getFederalAddressCode(),
+                        streets);
             } else {
-                // attempt to find by part KLADR (-2 last digits)
-                kladrStreetDictionaryRepository.findByPartKladr(
-                        getPartOfKladr(fiasAndKladr.getKladr()))
-                        .forEach(e -> addEntityKladrStreetToCollection(
+                // attempt to find by part address code (-2 last digits)
+                streetRepository.findByAddressCode(
+                        getPartOfAddressCode(externalAddressModel.getAddressCode()))
+                        .forEach(e -> addEntityStreetToCollection(
                                 processedDictionaryRecordCount,
                                 e,
-                                fiasAndKladr.getFias(),
-                                kladrStreetDictionaries));
+                                externalAddressModel.getFederalAddressCode(),
+                                streets));
             }
-        } else if (fiasFromDbfLength != 0) {
-            KladrDictionary kladrDictionary =
-                    kladrDictionaryRepository.findByKladr(fiasAndKladr.getKladr());
-            if (kladrDictionary != null) {
-                addEntityKladrToCollection(
+        } else if (federalAddressCodeFromDbfLength != 0) {
+            Settlement settlement =
+                    settlementRepository.getByAddressCode(externalAddressModel.getAddressCode());
+            if (settlement != null) {
+                addEntitySettlementToCollection(
                         processedDictionaryRecordCount,
-                        kladrDictionary,
-                        fiasAndKladr.getFias(),
-                        kladrDictionaries);
+                        settlement,
+                        externalAddressModel.getFederalAddressCode(),
+                        settlements);
             } else {
-                // attempt to find by part KLADR (-2 last digits)
-                kladrDictionaryRepository.findByPartKladr(
-                        getPartOfKladr(fiasAndKladr.getKladr()))
-                        .forEach(e -> addEntityKladrToCollection(
+                // attempt to find by part address code (-2 last digits)
+                settlementRepository.findByAddressCode(
+                        getPartOfAddressCode(externalAddressModel.getAddressCode()))
+                        .forEach(e -> addEntitySettlementToCollection(
                                 processedDictionaryRecordCount,
                                 e,
-                                fiasAndKladr.getFias(),
-                                kladrDictionaries));
+                                externalAddressModel.getFederalAddressCode(),
+                                settlements));
             }
         }
     }
 
     /**
-     * Setting FIAS to entity and addition to collection (for streets only)
+     * Setting federal address code to entity and addition to collection (for streets)
      */
-    private void addEntityKladrStreetToCollection(AtomicInteger processedDictionaryRecordCount,
-                                                  KladrStreetDictionary kladrStreetDictionary,
-                                                  String fias,
-                                                  List<KladrStreetDictionary> kladrStreetDictionaries) {
-        kladrStreetDictionary.setFias(fias);
-        kladrStreetDictionaries.add(kladrStreetDictionary);
+    private void addEntityStreetToCollection(AtomicInteger processedDictionaryRecordCount,
+                                             Street street,
+                                             String federalAddressCode,
+                                             List<Street> streets) {
+        street.setFederalAddressCode(federalAddressCode);
+        streets.add(street);
         processedDictionaryRecordCount.incrementAndGet();
     }
 
     /**
-     * Setting FIAS to entity and addition to collection (for not streets)
+     * Setting federal address code to entity and addition to collection (for settlements)
      */
-    private void addEntityKladrToCollection(AtomicInteger processedDictionaryRecordCount,
-                                            KladrDictionary kladrDictionary,
-                                            String fias,
-                                            List<KladrDictionary> kladrDictionaries) {
-        kladrDictionary.setFias(fias);
-        kladrDictionaries.add(kladrDictionary);
+    private void addEntitySettlementToCollection(AtomicInteger processedDictionaryRecordCount,
+                                                 Settlement settlement,
+                                                 String federalAddressCode,
+                                                 List<Settlement> settlements) {
+        settlement.setFederalAddressCode(federalAddressCode);
+        settlements.add(settlement);
         processedDictionaryRecordCount.incrementAndGet();
     }
 
     /**
-     * Get part KLADR (without 2 last digits) by full KLADR
+     * Get part of address code (without 2 last digits) by full address code
      */
-    private String getPartOfKladr(String fullKladr) {
-        return fullKladr.substring(0, fullKladr.length() - 2);
+    private String getPartOfAddressCode(String fullAddressCode) {
+        return fullAddressCode.substring(0, fullAddressCode.length() - 2);
     }
 }

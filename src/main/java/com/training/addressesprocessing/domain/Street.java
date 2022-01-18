@@ -10,31 +10,32 @@ import javax.persistence.Table;
  */
 @Entity
 @Table(name = "sprav_kladr_street")
-public class KladrStreetDictionary {
+public class Street {
 
     @Id
     private Integer id;
 
     /**
-     * KLADR identifier
+     * address code
      */
-    private String kladr;
+    @Column(name = "kladr")
+    private String addressCode;
 
     /**
-     * FIAS identifier
+     * federal address code
      */
     @Column(name = "external_id")
-    private String fias;
+    private String federalAddressCode;
 
     public Integer getId() {
         return id;
     }
 
-    public String getKladr() {
-        return kladr;
+    public String getAddressCode() {
+        return addressCode;
     }
 
-    public void setFias(String fias) {
-        this.fias = fias;
+    public void setFederalAddressCode(String federalAddressCode) {
+        this.federalAddressCode = federalAddressCode;
     }
 }
