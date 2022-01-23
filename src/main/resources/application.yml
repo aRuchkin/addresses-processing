@@ -1,8 +1,12 @@
 spring:
   datasource:
-    url: jdbc:mysql://localhost:3306/meddoc
+    url: jdbc:mysql://localhost:3306/databasename
     driver-class-name: com.mysql.cj.jdbc.Driver
-    username: root
-    password: root
+    username: user
+    password: pass
   jpa:
-    show-sql: true
+    show-sql: false
+
+app:
+  address-file-path: 'E:\Projects\dbf\'
+  address-file-name: 'dbf.zip'
