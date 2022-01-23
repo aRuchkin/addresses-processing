@@ -10,6 +10,7 @@ import com.training.addressesprocessing.repository.SettlementRepository;
 import com.training.addressesprocessing.repository.StreetRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
@@ -60,6 +61,7 @@ public class DbfProcessingService {
         this.batchAddressService = batchAddressService;
     }
 
+    @Async
     public void process() {
         extractFiles(fullPathArchive, destinationFolder);
         process(destinationFolder);
@@ -163,12 +165,12 @@ public class DbfProcessingService {
                                                  ExternalAddressModel externalAddressModel,
                                                  List<Street> streets,
                                                  List<Settlement> settlements) {
-        int federalAddressCodeFromDbfLength = externalAddressModel.getAddressCode().length();
-        if (federalAddressCodeFromDbfLength == 17) {
+        int federalAddressCodeLength = externalAddressModel.getAddressCode().length();
+        if (federalAddressCodeLength == 17) {
             Street street =
                     streetRepository.getByAddressCode(externalAddressModel.getAddressCode());
             if (street != null) {
-                addEntityStreetToCollection(
+                addStreetEntityToCollection(
                         processedDictionaryRecordCount,
                         street,
                         externalAddressModel.getFederalAddressCode(),
@@ -177,17 +179,17 @@ public class DbfProcessingService {
                 // attempt to find by part address code (-2 last digits)
                 streetRepository.findByAddressCode(
                         getPartOfAddressCode(externalAddressModel.getAddressCode()))
-                        .forEach(e -> addEntityStreetToCollection(
+                        .forEach(e -> addStreetEntityToCollection(
                                 processedDictionaryRecordCount,
                                 e,
                                 externalAddressModel.getFederalAddressCode(),
                                 streets));
             }
-        } else if (federalAddressCodeFromDbfLength != 0) {
+        } else if (federalAddressCodeLength != 0) {
             Settlement settlement =
                     settlementRepository.getByAddressCode(externalAddressModel.getAddressCode());
             if (settlement != null) {
-                addEntitySettlementToCollection(
+                addSettlementEntityToCollection(
                         processedDictionaryRecordCount,
                         settlement,
                         externalAddressModel.getFederalAddressCode(),
@@ -196,7 +198,7 @@ public class DbfProcessingService {
                 // attempt to find by part address code (-2 last digits)
                 settlementRepository.findByAddressCode(
                         getPartOfAddressCode(externalAddressModel.getAddressCode()))
-                        .forEach(e -> addEntitySettlementToCollection(
+                        .forEach(e -> addSettlementEntityToCollection(
                                 processedDictionaryRecordCount,
                                 e,
                                 externalAddressModel.getFederalAddressCode(),
@@ -208,7 +210,7 @@ public class DbfProcessingService {
     /**
      * Setting federal address code to entity and addition to collection (for streets)
      */
-    private void addEntityStreetToCollection(AtomicInteger processedDictionaryRecordCount,
+    private void addStreetEntityToCollection(AtomicInteger processedDictionaryRecordCount,
                                              Street street,
                                              String federalAddressCode,
                                              List<Street> streets) {
@@ -220,7 +222,7 @@ public class DbfProcessingService {
     /**
      * Setting federal address code to entity and addition to collection (for settlements)
      */
-    private void addEntitySettlementToCollection(AtomicInteger processedDictionaryRecordCount,
+    private void addSettlementEntityToCollection(AtomicInteger processedDictionaryRecordCount,
                                                  Settlement settlement,
                                                  String federalAddressCode,
                                                  List<Settlement> settlements) {

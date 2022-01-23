@@ -1,8 +1,6 @@
 package com.training.addressesprocessing.controller;
 
 import com.training.addressesprocessing.service.DbfProcessingService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -12,7 +10,6 @@ import org.springframework.web.bind.annotation.RestController;
 public class AddressesProcessingController {
 
     private final DbfProcessingService dbfProcessingService;
-    private final Logger logger = LoggerFactory.getLogger(getClass());
 
     public AddressesProcessingController(DbfProcessingService dbfProcessingService) {
         this.dbfProcessingService = dbfProcessingService;
@@ -22,9 +19,9 @@ public class AddressesProcessingController {
      * Method for start processing
      */
     @GetMapping
-    public void startProcessing() {
-        logger.info("Start processing...");
+    public String startProcessing() {
         dbfProcessingService.process();
+        return "Process has started, look at log for details...";
     }
 
 }
