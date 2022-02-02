@@ -22,6 +22,10 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -41,6 +45,7 @@ public class DbfProcessingService {
     private static final int FEDERAL_ADDRESS_CODE_FIELD_INDEX = 1;  // index of federal address code in database record
     private static final int ADDRESS_CODE_FIELD_INDEX = 8; // index of address code in database record
     private static final int PACKAGE_PROCESSING_SIZE = 5000;
+    private static final int THREAD_POOL_SIZE = 8;
 
     private final SettlementRepository settlementRepository;
     private final StreetRepository streetRepository;
@@ -64,7 +69,28 @@ public class DbfProcessingService {
     @Async
     public void process() {
         extractFiles(fullPathArchive, destinationFolder);
-        process(destinationFolder);
+        ExecutorService executorService = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
+        List<Future<String>> results = new ArrayList<>();
+        logger.info("Start processing files...");
+        try {
+            List<File> filesInFolder = Files.walk(Paths.get(destinationFolder.getAbsolutePath()))
+                    .filter(Files::isRegularFile)
+                    .map(Path::toFile)
+                    .collect(Collectors.toList());
+            for (File file : filesInFolder) {
+                Future<String> result = executorService.submit(processFile(file));
+                results.add(result);
+            }
+        } catch (IOException e) {
+            logger.error("File processing error");
+        }
+        for (Future<String> result : results) {
+            try {
+                result.get();
+            } catch (Exception e) {
+                logger.error("Couldn't process file: " + result);
+            }
+        }
         logger.info("All files are processed!");
     }
 
@@ -87,15 +113,12 @@ public class DbfProcessingService {
     }
 
     /**
-     * Processing extracted files from temporary folder
+     * Processing one extracted file
      */
-    private void process(File destinationFolder) {
-        try {
-            List<File> filesInFolder = Files.walk(Paths.get(destinationFolder.getAbsolutePath()))
-                    .filter(Files::isRegularFile)
-                    .map(Path::toFile)
-                    .collect(Collectors.toList());
-            for (File file : filesInFolder) {
+    private Callable<String> processFile(File file) {
+        return new Callable() {
+            @Override
+            public String call() {
                 AtomicInteger processedDictionaryRecordCount = new AtomicInteger();
                 List<Street> streets = new ArrayList<>();
                 List<Settlement> settlements = new ArrayList<>();
@@ -122,11 +145,12 @@ public class DbfProcessingService {
                     logger.info("Processed " + recordCount + " DBF records " +
                             "(" + processedDictionaryRecordCount + " matches)");
                     file.deleteOnExit();
+                } catch (IOException e) {
+                    logger.error("Couldn't process file: " + file.getName());
                 }
+                return file.getName();
             }
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        };
     }
 
     /**
